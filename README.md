@@ -151,6 +151,10 @@ uv run python -m coverage_planner.experiments.plot_sweep scatter --series-by chu
 # Score-per-runtime efficiency lines against full_horizon_greedy_solve:
 uv run python -m coverage_planner.experiments.plot_sweep efficiency
 uv run python -m coverage_planner.experiments.plot_sweep efficiency --x-axis chunksize --agents 3 --steps 8
+
+# Score-vs-runtime Pareto tradeoff curve traced over chunksize:
+uv run python -m coverage_planner.experiments.plot_sweep pareto
+uv run python -m coverage_planner.experiments.plot_sweep pareto --steps 8 --series-by agents
 ```
 
 Useful flags:
@@ -172,6 +176,15 @@ The efficiency plot computes `(method_score / method_runtime) /
 (reference_score / reference_runtime)` for matched sweep cells, then plots the
 mean ratio as a line with a min-to-max band. Values above `1.0` mean the method
 delivered more score per unit runtime than the reference method.
+
+The pareto plot traces the score-vs-runtime tradeoff as a curve over chunksize:
+each point is one chunksize, placed at the mean runtime ratio (x, log scale)
+and mean score ratio (y) against the reference method, with a shaded band down
+to the worst-case (min) score ratio. One line is drawn per `--series-by` value
+(default: `agents`). Unless `--method` is given, the curve traces
+`rolling_horizon_greedy_solve`, so the chart answers directly: how much
+coverage does rolling-horizon give up for how much speedup, and where is the
+knee in chunksize?
 
 ### Programmatic access
 For ad-hoc analysis (e.g. in a notebook), the storage helpers return DataFrames

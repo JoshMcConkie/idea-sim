@@ -1,6 +1,6 @@
 """Rendering helpers for persisted sweep data.
 
-Two top-level entry points:
+Top-level entry points:
     - render_heatmaps(df, meta, output_root)  -> per-agent ratio heatmaps.
     - render_scatter(raw_df, meta, ...)       -> score-vs-runtime scatter
                                                  of methods relative to a
@@ -9,6 +9,10 @@ Two top-level entry points:
                                                -> score/runtime ratio lines
                                                   relative to a reference
                                                   method.
+    - render_pareto(raw_df, meta, ...)        -> score-vs-runtime Pareto
+                                                 tradeoff curve traced over
+                                                 chunksize, relative to a
+                                                 reference method.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ SCATTER_SERIES_COLUMNS: tuple[str, ...] = (
 PLOT_DIMENSION_COLUMNS = SCATTER_SERIES_COLUMNS
 
 DEFAULT_FRAME_DURATION = 0.5
+
+DEFAULT_PARETO_METHOD = "rolling_horizon_greedy_solve"
 
 
 def _figure_to_png_bytes(fig: Figure, *, dpi: int = 200) -> bytes:
@@ -1118,4 +1124,214 @@ def render_scatter_gif(
     )
 
     _save_gif(frames, grid_dir / filename, frame_duration=frame_duration)
+    return grid_dir
+
+
+def _pareto_summary(
+    raw_df: pd.DataFrame,
+    *,
+    series_by: str = "agents",
+    reference_method: str = "full_horizon_greedy_solve",
+    filters: dict | None = None,
+) -> pd.DataFrame:
+    """Aggregate per-result ratios into one Pareto point per chunksize.
+
+    Each row is a `(series_by value, chunksize)` pair carrying the mean
+    runtime ratio plus the mean and min score ratio against the reference
+    method, averaged over all matched sweep cells.
+    """
+    if series_by not in PLOT_DIMENSION_COLUMNS:
+        raise ValueError(
+            f"series_by={series_by!r} not supported. "
+            f"Choose one of {PLOT_DIMENSION_COLUMNS}."
+        )
+    if series_by == "chunksize":
+        raise ValueError(
+            "series_by='chunksize' is not supported for pareto plots; "
+            "chunksize is the dimension traced along each curve."
+        )
+
+    merged = _scatter_ratios(
+        raw_df,
+        series_by=series_by,
+        reference_method=reference_method,
+        filters=filters,
+    )
+
+    summary = (
+        merged.groupby([series_by, "chunksize"])
+        .agg(
+            runtime_ratio_mean=("runtime_ratio", "mean"),
+            score_ratio_mean=("score_ratio", "mean"),
+            score_ratio_min=("score_ratio", "min"),
+        )
+        .reset_index()
+    )
+    return summary
+
+
+def _pareto_title(
+    meta: dict,
+    *,
+    series_by: str,
+    reference_method: str,
+    filters: dict | None,
+) -> str:
+    title_bits = [
+        f"Score vs Runtime Tradeoff by Chunksize ({meta['name']}, "
+        f"grid {meta['grid_size']}x{meta['grid_size']})",
+        f"series={series_by}, reference={reference_method}",
+    ]
+    if filters:
+        filt_str = ", ".join(f"{k}={v}" for k, v in sorted(filters.items()))
+        title_bits.append(f"filters: {filt_str}")
+    return "\n".join(title_bits)
+
+
+def _draw_pareto(
+    ax,
+    summary: pd.DataFrame,
+    *,
+    series_by: str,
+    reference_method: str,
+    title: str,
+) -> None:
+    """Draw the chunksize-traced Pareto tradeoff curve onto ``ax``.
+
+    Each series is a line through `(mean runtime ratio, mean score ratio)`
+    points ordered by chunksize, with a shaded band down to the min score
+    ratio (worst start cell). Point labels are the chunksize values.
+    """
+    cmap = plt.get_cmap("tab10")
+
+    series_values = _sorted_unique(summary[series_by])
+
+    for i, value in enumerate(series_values):
+        subset = summary[summary[series_by] == value].sort_values("chunksize")
+
+        x = subset["runtime_ratio_mean"].to_numpy(dtype=float)
+        mean_y = subset["score_ratio_mean"].to_numpy(dtype=float)
+        min_y = subset["score_ratio_min"].to_numpy(dtype=float)
+        color = cmap(i % cmap.N)
+
+        ax.plot(
+            x,
+            mean_y,
+            marker="o",
+            markersize=4,
+            linewidth=1.6,
+            label=f"{series_by}={value}",
+            color=color,
+        )
+        ax.fill_between(x, min_y, mean_y, color=color, alpha=0.14, linewidth=0)
+
+        for xi, yi, chunk in zip(x, mean_y, subset["chunksize"]):
+            ax.annotate(
+                str(chunk),
+                (xi, yi),
+                textcoords="offset points",
+                xytext=(4, 4),
+                fontsize=6,
+                color=color,
+            )
+
+    ax.axhline(1.0, linestyle="--", linewidth=0.8, color="gray")
+    ax.axvline(1.0, linestyle="--", linewidth=0.8, color="gray")
+    ax.scatter(
+        [1.0], [1.0],
+        marker="x", color="black", s=60, zorder=5,
+        label=f"{reference_method} (reference)",
+    )
+
+    ax.set_xscale("log")
+
+    ax.set_xlabel(f"Mean runtime ratio (method / {reference_method}, log scale)")
+    ax.set_ylabel(f"Score ratio (method / {reference_method})")
+    ax.set_title(title)
+    ax.legend(loc="best", fontsize=8, frameon=True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+
+
+def render_pareto(
+    raw_df: pd.DataFrame,
+    meta: dict,
+    *,
+    series_by: str = "agents",
+    reference_method: str = "full_horizon_greedy_solve",
+    output_root: Path = Path("results"),
+    filters: dict | None = None,
+) -> Path:
+    """Render the score-vs-runtime Pareto tradeoff curve traced over chunksize.
+
+    Each point is one chunksize, placed at the mean runtime ratio (x, log
+    scale) and mean score ratio (y) against the reference method over all
+    matched `(agents, steps, chunksize, start_row, start_col)` cells. The
+    shaded band drops to the min score ratio (worst start cell), and lines
+    are split by ``series_by``.
+
+    If ``filters`` does not pin a method, the curve defaults to
+    ``DEFAULT_PARETO_METHOD`` so a single method's frontier is traced.
+
+    Args:
+        raw_df: per-method, per-start results (from `storage.load_sweep_raw_df`).
+        meta: the sweep header dict (used for output path and titles).
+        series_by: column controlling line color. One of
+            {"method", "agents", "steps"} ("chunksize" is the traced axis).
+        reference_method: method used as the denominator for ratios.
+        output_root: parent directory under which the plot is saved.
+        filters: optional dict of column->value to slice `raw_df` before
+            plotting (e.g. `{"steps": 8}`).
+
+    Returns:
+        The directory the plot was written to.
+    """
+    filters = dict(filters or {})
+    if "method" not in filters and series_by != "method":
+        filters["method"] = DEFAULT_PARETO_METHOD
+
+    summary = _pareto_summary(
+        raw_df,
+        series_by=series_by,
+        reference_method=reference_method,
+        filters=filters,
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    _draw_pareto(
+        ax,
+        summary,
+        series_by=series_by,
+        reference_method=reference_method,
+        title=_pareto_title(
+            meta,
+            series_by=series_by,
+            reference_method=reference_method,
+            filters=filters,
+        ),
+    )
+
+    fig.text(
+        0.5,
+        0.01,
+        "Points are labeled with chunksize; shaded band spans mean to "
+        "worst-case (min) score ratio.",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+    )
+
+    grid_size = int(meta["grid_size"])
+    grid_dir = output_root / meta["name"] / f"grid_{grid_size}x{grid_size}"
+    grid_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = (
+        f"{meta['name']}__pareto__seriesby_{series_by}"
+        f"{_filters_suffix(filters or None)}"
+        f"__grid_{grid_size}x{grid_size}.png"
+    )
+
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.savefig(grid_dir / filename, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
     return grid_dir

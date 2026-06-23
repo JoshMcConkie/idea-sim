@@ -11,6 +11,9 @@ Examples:
         --db-path results/same_start/sweeps.db
     python -m coverage_planner.experiments.plot_sweep efficiency --x-axis chunksize \\
         --steps 8 --animate-over agents --frame-duration 0.5
+    python -m coverage_planner.experiments.plot_sweep pareto
+    python -m coverage_planner.experiments.plot_sweep pareto --steps 8 \\
+        --series-by agents
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ def main() -> None:
     )
     parser.add_argument(
         "kind",
-        choices=["heatmap", "scatter", "efficiency"],
+        choices=["heatmap", "scatter", "efficiency", "pareto"],
         help="Plot kind to render.",
     )
     parser.add_argument(
@@ -47,9 +50,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--series-by",
-        default="method",
+        default=None,
         choices=list(plotting.PLOT_DIMENSION_COLUMNS),
-        help="Column controlling color/series in scatter or efficiency plots.",
+        help=(
+            "Column controlling color/series in scatter, efficiency, or "
+            "pareto plots. Defaults to 'method' (scatter/efficiency) or "
+            "'agents' (pareto)."
+        ),
     )
     parser.add_argument(
         "--x-axis",
@@ -103,6 +110,19 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    series_by = args.series_by
+    if series_by is None:
+        series_by = "agents" if args.kind == "pareto" else "method"
+
+    if args.kind == "pareto":
+        if args.animate_over is not None:
+            parser.error("pareto plots do not support --animate-over.")
+        if series_by == "chunksize":
+            parser.error(
+                "pareto plots trace chunksize along each curve; "
+                "--series-by chunksize is not supported."
+            )
+
     if args.animate_over is not None:
         if args.kind == "heatmap":
             if args.animate_over != "agents":
@@ -116,7 +136,7 @@ def main() -> None:
                     "--animate-over must differ from --x-axis "
                     f"(both are {args.animate_over!r})."
                 )
-            if args.animate_over == args.series_by:
+            if args.animate_over == series_by:
                 parser.error(
                     "--animate-over must differ from --series-by "
                     f"(both are {args.animate_over!r})."
@@ -175,7 +195,7 @@ def main() -> None:
             if args.kind == "scatter":
                 if args.animate_over is not None:
                     print(
-                        f"Rendering scatter GIF (series_by={args.series_by}, "
+                        f"Rendering scatter GIF (series_by={series_by}, "
                         f"animate_over={args.animate_over}, "
                         f"frame_duration={args.frame_duration}s)..."
                     )
@@ -183,25 +203,34 @@ def main() -> None:
                         raw_df,
                         meta,
                         animate_over=args.animate_over,
-                        series_by=args.series_by,
+                        series_by=series_by,
                         reference_method=args.reference_method,
                         filters=filters,
                         frame_duration=args.frame_duration,
                     )
                 else:
-                    print(f"Rendering scatter (series_by={args.series_by})...")
+                    print(f"Rendering scatter (series_by={series_by})...")
                     out_dir = plotting.render_scatter(
                         raw_df,
                         meta,
-                        series_by=args.series_by,
+                        series_by=series_by,
                         reference_method=args.reference_method,
                         filters=filters,
                     )
+            elif args.kind == "pareto":
+                print(f"Rendering pareto (series_by={series_by})...")
+                out_dir = plotting.render_pareto(
+                    raw_df,
+                    meta,
+                    series_by=series_by,
+                    reference_method=args.reference_method,
+                    filters=filters,
+                )
             else:
                 if args.animate_over is not None:
                     print(
                         "Rendering efficiency GIF "
-                        f"(x_axis={args.x_axis}, series_by={args.series_by}, "
+                        f"(x_axis={args.x_axis}, series_by={series_by}, "
                         f"animate_over={args.animate_over}, "
                         f"frame_duration={args.frame_duration}s)..."
                     )
@@ -210,7 +239,7 @@ def main() -> None:
                         meta,
                         animate_over=args.animate_over,
                         x_axis=args.x_axis,
-                        series_by=args.series_by,
+                        series_by=series_by,
                         reference_method=args.reference_method,
                         filters=filters,
                         frame_duration=args.frame_duration,
@@ -218,13 +247,13 @@ def main() -> None:
                 else:
                     print(
                         "Rendering efficiency "
-                        f"(x_axis={args.x_axis}, series_by={args.series_by})..."
+                        f"(x_axis={args.x_axis}, series_by={series_by})..."
                     )
                     out_dir = plotting.render_efficiency_lines(
                         raw_df,
                         meta,
                         x_axis=args.x_axis,
-                        series_by=args.series_by,
+                        series_by=series_by,
                         reference_method=args.reference_method,
                         filters=filters,
                     )

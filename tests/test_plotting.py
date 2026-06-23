@@ -105,6 +105,69 @@ def test_efficiency_rejects_same_axis_and_series():
         )
 
 
+def _pareto_raw_df():
+    return pd.DataFrame([
+        # chunksize=1: rolling is twice as fast but loses score.
+        _row(chunksize=1, start_col=0, method="full_horizon_greedy_solve", score=10, runtime=2),
+        _row(chunksize=1, start_col=0, method="rolling_horizon_greedy_solve", score=8, runtime=1),
+        _row(chunksize=1, start_col=1, method="full_horizon_greedy_solve", score=10, runtime=2),
+        _row(chunksize=1, start_col=1, method="rolling_horizon_greedy_solve", score=9, runtime=1),
+        # chunksize=2 (== steps): rolling matches the reference exactly.
+        _row(chunksize=2, start_col=0, method="full_horizon_greedy_solve", score=10, runtime=2),
+        _row(chunksize=2, start_col=0, method="rolling_horizon_greedy_solve", score=10, runtime=2),
+        _row(chunksize=2, start_col=1, method="full_horizon_greedy_solve", score=10, runtime=2),
+        _row(chunksize=2, start_col=1, method="rolling_horizon_greedy_solve", score=10, runtime=2),
+    ])
+
+
+def test_pareto_summary_aggregates_one_point_per_chunksize():
+    summary = plotting._pareto_summary(
+        _pareto_raw_df(),
+        series_by="agents",
+        filters={"method": "rolling_horizon_greedy_solve"},
+    )
+
+    assert len(summary) == 2
+
+    chunk1 = summary[summary["chunksize"] == 1].iloc[0]
+    assert chunk1["runtime_ratio_mean"] == pytest.approx(0.5)
+    assert chunk1["score_ratio_mean"] == pytest.approx(0.85)
+    assert chunk1["score_ratio_min"] == pytest.approx(0.8)
+
+    chunk2 = summary[summary["chunksize"] == 2].iloc[0]
+    assert chunk2["runtime_ratio_mean"] == pytest.approx(1.0)
+    assert chunk2["score_ratio_mean"] == pytest.approx(1.0)
+    assert chunk2["score_ratio_min"] == pytest.approx(1.0)
+
+
+def test_pareto_summary_rejects_chunksize_series():
+    with pytest.raises(ValueError, match="chunksize"):
+        plotting._pareto_summary(
+            _pareto_raw_df(),
+            series_by="chunksize",
+        )
+
+
+def test_render_pareto_defaults_method_filter_and_writes_file(tmp_path: Path):
+    meta = {"name": "unit", "grid_size": 4}
+
+    out_dir = plotting.render_pareto(
+        _pareto_raw_df(),
+        meta,
+        output_root=tmp_path,
+    )
+
+    expected = (
+        out_dir
+        / (
+            "unit__pareto__seriesby_agents"
+            "__method_rolling_horizon_greedy_solve__grid_4x4.png"
+        )
+    )
+    assert out_dir == tmp_path / "unit" / "grid_4x4"
+    assert expected.is_file()
+
+
 def test_render_efficiency_lines_writes_expected_file(tmp_path: Path):
     raw_df = pd.DataFrame([
         _row(start_col=0, method="full_horizon_greedy_solve", score=10, runtime=2),
