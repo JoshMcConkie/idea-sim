@@ -7,13 +7,21 @@ package compares full-horizon sequential greedy against a chunked rolling-horizo
 count, and planning horizon. Per-run results are persisted to SQLite and visualized as
 heatmaps or score-vs-runtime scatters from a single CLI.
 
+## Question
+
+In mult-agent path planning, what is the coverage score/runtime we trade by planning a rolling horizon instead of a full horizon?
+
+## Why a rolling horizon?
+Full-horizon planning requires agents to select ytheur entire path as one event. Complexity of the search algorithm is exponential, so full-horizon planning cost/runtime increases quickly. A rolling horizon allows agents to iteratively plan path portions, rather than exhaustively planning the entire path. For example, if a full horizon This can decrease runtime from a^n to 2
+
 ## Problem Structure
 
-We have $K$ agents on a square grid. The goal is the maximize the total coverage of the grid given the following constraints:
+We have $K$ identical agents on a square grid. The goal is the maximize the total coverage of the grid given the following constraints:
 
 - A set path length for each agent
 - The grid is comprised of discrete integer coordinates
 - Each coordinate is worth 1 point, with overlapping providing no extra benefit
+- Agents choose sequentially, with full past information but no consideration of other agent preferences
 
 > [!NOTE]
 > **Scope.** Currently, we only consider the case where all agents share the same initial position.
@@ -69,9 +77,9 @@ $$
 \end{array}
 $$
 
-## Approach
+## Methods
 
-The above structure outlines the greedy approach, maximizing marginal utility of path coverage for all agents, iterating over all paths of length $D$ available to that agent. This increases exponentially as $D$ increases.
+The above structure outlines the full-horizon greedy approach, maximizing marginal utility of path coverage for all agents, iterating over all paths of length $D$ available to that agent. This increases exponentially as $D$ increases.
 
 We attempt to divide the problem into rounds: instead of $`e_k`$ encoding a path of length $D$, we provide a smaller, maximum "chunk size" each round will plan for. Given some chunk size $0 < d < D$, partial paths are planned in much the same manner as the full paths, with each round carrying over all previously chosen path indices. If $d \mid D$, then $`D_r = d`$ for each round $r$. If $d \nmid D$, then $`D_r = d`$ for all but the final round, where $`D_{r_{\text{final}}} = D \bmod d`$.
 
@@ -113,14 +121,19 @@ sweep; old sweeps remain queryable. Pass a different relative or absolute path t
 `storage.connect(...)` to read or write another database file under `results/`.
 
 To change the sweep range or whether the optimal baseline is solved, edit the
-constants near the top of
-[`src/coverage_planner/experiments/run_sweep.py`](src/coverage_planner/experiments/run_sweep.py):
+constants in
+[`src/coverage_planner/experiments/config.py`](src/coverage_planner/experiments/config.py):
 
 ```python
-num_agents = 7
-max_size = 8
+NUM_AGENTS = 7
+MAX_SIZE = 8
+
 SOLVE_OPTIMAL = False
 SWEEP_NAME = "same_start"
+
+# Number of worker processes for the parallel sweep.
+# None defaults to os.cpu_count().
+MAX_WORKERS = None
 ```
 
 ### Render plots
@@ -131,11 +144,11 @@ writes PNGs into `results/<name>/grid_NxN/`.
 # Per-agent split-vs-greedy heatmaps (score min/mean, runtime max/mean):
 uv run python -m coverage_planner.experiments.plot_sweep heatmap
 
-# Score-vs-runtime scatter of each method against seq_greedy_solve:
+# Score-vs-runtime scatter of each method against full_horizon_greedy_solve:
 uv run python -m coverage_planner.experiments.plot_sweep scatter --series-by method
 uv run python -m coverage_planner.experiments.plot_sweep scatter --series-by chunksize
 
-# Score-per-runtime efficiency lines against seq_greedy_solve:
+# Score-per-runtime efficiency lines against full_horizon_greedy_solve:
 uv run python -m coverage_planner.experiments.plot_sweep efficiency
 uv run python -m coverage_planner.experiments.plot_sweep efficiency --x-axis chunksize --agents 3 --steps 8
 ```
@@ -151,7 +164,7 @@ Useful flags:
 - `--x-axis {method,chunksize,agents,steps}` — x-axis for efficiency line plots
   (default: `agents`).
 - `--reference-method NAME` — denominator for scatter and efficiency ratios
-  (default: `seq_greedy_solve`).
+  (default: `full_horizon_greedy_solve`).
 - `--agents N`, `--steps N`, `--chunksize N`, `--method NAME` — filter
   raw-result plots before rendering scatter or efficiency views.
 
