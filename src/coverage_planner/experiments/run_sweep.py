@@ -5,6 +5,7 @@ from coverage_planner.experiments.config import (
     NUM_AGENTS,
     MAX_SIZE,
     SOLVE_OPTIMAL,
+    STEP_SIZES,
     SWEEP_NAME,
     MAX_WORKERS,
 )
@@ -132,11 +133,14 @@ def main():
     rows = []
     raw_rows = []
 
-    total_runs = NUM_AGENTS * MAX_SIZE * (MAX_SIZE + 1) // 2
+    total_runs = sum(
+        NUM_AGENTS * steps
+        for steps in STEP_SIZES
+    )
 
     cells = [
         (steps, n, chunk)
-        for steps in range(1, MAX_SIZE + 1)
+        for steps in STEP_SIZES
         for n in range(1, NUM_AGENTS + 1)
         for chunk in range(1, steps + 1)
     ]
