@@ -5,6 +5,16 @@ build/
 dist/
 wheels/
 *.egg-info
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv
+
+# OS noise
+.DS_Store
+
+# Local reports / profiling output
+runtime-report.html
+commit_report.txt
