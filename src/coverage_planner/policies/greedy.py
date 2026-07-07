@@ -71,14 +71,17 @@ def rolling_horizon_greedy_solve(model: Model, chunksize: int) -> Result:
     if remainder:
         rounds.append(remainder)
     prior_coverage_state = None
+
     for chunk in rounds:
         round_model = build_path_model(model.grid, model.objective,chunk, model.agent_order)
         score, path_ids = greedy_assign_paths(round_model, round_model.agent_order,
                                               prior_coverage_state)
         paths_by_agent = commit_paths_to_agents(round_model, path_ids)
+
         if prior_coverage_state is None:
             prior_coverage_state = np.zeros(round_model.util_mat.shape[1])
         prior_coverage_state += round_model.util_mat[path_ids].max(axis=0)
+        
     end_time = time.perf_counter()
     result = Result(model.grid.grid,paths_by_agent,
                   model.grid.get_score(),rolling_horizon_greedy_solve,
@@ -87,6 +90,11 @@ def rolling_horizon_greedy_solve(model: Model, chunksize: int) -> Result:
                   agent_order=model.agent_order,steps=model.steps,)
     model.grid.reset_grid()
     return result
+
+#TODO: Implement this function without the adjacency constraint (e.g. each step can be any viable coordinate that
+# still satisfies the path length constraint)
+def rolling_horizon_no_adjacency_constraint(model: Model, chunksize: int) -> Result:
+    raise NotImplementedError
 
 
 def best_order_full_horizon_greedy_solve(model: Model) -> Result:
