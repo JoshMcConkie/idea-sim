@@ -1,18 +1,35 @@
 # multi-agent-coverage-planner
 
-A benchmark for **rolling-horizon coverage** path planning on a multi-agent grid. Agents
-are allocated paths to maximize joint grid coverage under a submodular objective; the
-package compares full-horizon sequential greedy against a chunked rolling-horizon variant
-(and an optional exhaustive baseline) across configurable sweeps of grid size, agent
-count, and planning horizon. Per-run results are persisted to SQLite and visualized as
-heatmaps or score-vs-runtime scatters from a single CLI.
+A benchmark for **rolling-horizon (receding-horizon) coverage path planning** on a
+multi-agent grid. Agents are allocated paths to maximize joint grid coverage under a
+submodular objective; the package compares full-horizon sequential greedy against a
+chunked rolling-horizon variant (and an optional exhaustive baseline) across
+configurable sweeps of grid size, agent count, and planning horizon. Per-run results
+are persisted to SQLite and visualized as heatmaps, score-vs-runtime scatters, and
+Pareto tradeoff curves from a single CLI.
+
+![Score vs runtime tradeoff by chunksize](results/same_start/grid_8x8/same_start__pareto__seriesby_agents__method_rolling_horizon_greedy_solve_steps_8__grid_8x8.png)
+
+**Headline result (8×8 grid, 8-step paths, 1–7 agents):** planning in chunks of 3–4
+steps recovers ~97–99% of full-horizon greedy coverage on average at a 2.5–10×
+runtime reduction, while fully myopic single-step planning gives up ~44% of coverage
+on average in the 7-agent case (worse still in the worst case). The knee of the
+tradeoff sits at intermediate chunk sizes.
 
 ## Question
 
-In mult-agent path planning, what is the coverage score/runtime we trade by planning a rolling horizon instead of a full horizon?
+In multi-agent path planning, how much coverage score do we trade — and how much
+runtime do we save — by planning over a rolling horizon instead of the full horizon?
 
 ## Why a rolling horizon?
-Full-horizon planning requires agents to select ytheur entire path as one event. Complexity of the search algorithm is exponential, so full-horizon planning cost/runtime increases quickly. A rolling horizon allows agents to iteratively plan path portions, rather than exhaustively planning the entire path. For example, if a full horizon This can decrease runtime from a^n to 2
+
+Full-horizon planning requires each agent to commit to its entire path in one
+decision. Since the number of candidate paths grows exponentially in path length
+(branching factor ≈ 3–4 per step), full-horizon planning becomes expensive quickly. A
+rolling horizon instead plans the path in chunks of `d < D` steps, carrying coverage
+state between rounds: enumeration cost per round drops from O(b^D) to O(b^d), at the
+price of myopia — an agent cannot see value that lies more than `d` steps ahead. This
+benchmark quantifies that price empirically.
 
 ## Problem Structure
 
