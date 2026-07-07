@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from coverage-planner!")
+"""Multi-agent rolling-horizon coverage path-planning tools."""
